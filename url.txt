@@ -1,0 +1,14 @@
+# URL Terkait Proyek Akhir Analisis Data
+# Dataset
+https://example.com/data_1.csv
+https://example.com/data_2.csv
+
+# Dokumentasi Streamlit
+https://docs.streamlit.io/
+
+# Referensi Visualisasi
+https://seaborn.pydata.org/
+https://matplotlib.org/
+
+# Panduan Analisis Data
+https://pandas.pydata.org/
