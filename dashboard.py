@@ -1,91 +1,115 @@
-import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-import plotly.express as px
+import streamlit as st
+import os
+
+# Pengaturan gaya visualisasi
+sns.set(style='darkgrid')
 
 # Mengimpor dataset
-orders_df = pd.read_csv('C:/Users/Halo/Downloads/E-Commerce Public Dataset/orders.csv')
-order_items_df = pd.read_csv('C:/Users/Halo/Downloads/E-Commerce Public Dataset/order_items.csv')
-customers_df = pd.read_csv('C:/Users/Halo/Downloads/E-Commerce Public Dataset/customers.csv')
+orders = pd.read_csv(
+    os.path.join('orders_dataset.csv'),
+    parse_dates=[
+        "order_purchase_timestamp",
+        "order_approved_at",
+        "order_delivered_customer_date",
+        "order_estimated_delivery_date"
+    ]
+)
+order_items = pd.read_csv(os.path.join('order_items_dataset.csv'))
+customers = pd.read_csv(os.path.join('customers_dataset.csv'))
 
-# Menampilkan preview data untuk memastikan data berhasil dimuat
-st.subheader("Preview Orders Dataset")
-st.write(orders_df.head())
+# Filter berdasarkan rentang tanggal
+min_date = orders["order_approved_at"].min()
+max_date = orders["order_approved_at"].max()
 
-st.subheader("Preview Order Items Dataset")
-st.write(order_items_df.head())
+with st.sidebar:
+    st.write("### Filter by Date Range")
+    start_date, end_date = st.date_input(
+        "Select Date Range",
+        value=[min_date, max_date],
+        min_value=min_date,
+        max_value=max_date
+    )
 
-st.subheader("Preview Customers Dataset")
-st.write(customers_df.head())
+# Filter data berdasarkan tanggal
+filtered_orders = orders[
+    (orders["order_approved_at"] >= pd.to_datetime(start_date)) &
+    (orders["order_approved_at"] <= pd.to_datetime(end_date))
+]
 
-# ===========================
-# Analisis 1: Faktor yang Memengaruhi Nilai Total Pembelian
-# ===========================
-st.header("1. Faktor yang Memengaruhi Nilai Total Pembelian")
+# Analisis harian
+daily_orders = (
+    filtered_orders.groupby(filtered_orders["order_approved_at"].dt.date)
+    .agg(order_count=("order_id", "count"), revenue=("order_id", "size"))
+    .reset_index()
+)
 
-# Gabungkan data orders dengan customers
-merged_df = pd.merge(orders_df, customers_df, on='customer_id', how='left')
+# Pengeluaran per pelanggan
+customer_spend = (
+    order_items.merge(orders, on="order_id")
+    .groupby("customer_id")
+    .agg(total_spend=("price", "sum"))
+    .reset_index()
+)
 
-# Membuat visualisasi distribusi total pembelian
-total_pembelian_fig = plt.figure(figsize=(8, 6))
-sns.histplot(merged_df['total_pembelian'], kde=True, color='skyblue')
-plt.title('Distribusi Total Pembelian Pelanggan')
-plt.xlabel('Total Pembelian')
-plt.ylabel('Frekuensi')
-st.pyplot(total_pembelian_fig)
+# Analisis produk
+product_sales = order_items.groupby("product_id").agg(
+    product_count=("order_item_id", "count"),
+    total_revenue=("price", "sum")
+).reset_index()
 
-# ===========================
-# Analisis 2: Pola Pembelian Berdasarkan Waktu
-# ===========================
-st.header("2. Pola Pembelian Berdasarkan Waktu")
+# Visualisasi Dashboard
+st.title("E-Commerce Dashboard")
 
-# Convert kolom waktu ke format datetime
-merged_df['tanggal'] = pd.to_datetime(merged_df['order_date'])
+# Daily Orders
+st.subheader("Daily Orders Overview")
+col1, col2 = st.columns(2)
+with col1:
+    st.markdown(f"**Total Orders:** {daily_orders['order_count'].sum()}")
+with col2:
+    st.markdown(f"**Total Revenue:** {daily_orders['revenue'].sum()}")
 
-# Pola pembelian harian
-daily_sales_fig = plt.figure(figsize=(8, 6))
-merged_df.groupby(merged_df['tanggal'].dt.date)['total_pembelian'].sum().plot(kind='line', color='orange')
-plt.title('Pola Pembelian Harian')
-plt.xlabel('Tanggal')
-plt.ylabel('Total Pembelian')
-st.pyplot(daily_sales_fig)
+fig, ax = plt.subplots(figsize=(12, 6))
+sns.lineplot(data=daily_orders, x="order_approved_at", y="order_count", marker="o", ax=ax)
+ax.set_title("Daily Orders")
+st.pyplot(fig)
 
-# Pola pembelian musiman
-merged_df['bulan'] = merged_df['tanggal'].dt.month
-monthly_sales_fig = plt.figure(figsize=(8, 6))
-merged_df.groupby('bulan')['total_pembelian'].sum().plot(kind='bar', color='green')
-plt.title('Pola Pembelian Musiman (Bulanan)')
-plt.xlabel('Bulan')
-plt.ylabel('Total Pembelian')
-st.pyplot(monthly_sales_fig)
+# Customer Spending
+st.subheader("Customer Spending Analysis")
+col1, col2 = st.columns(2)
+with col1:
+    st.markdown(f"**Total Spending:** {customer_spend['total_spend'].sum()}")
+with col2:
+    st.markdown(f"**Average Spending:** {customer_spend['total_spend'].mean():.2f}")
 
-# ===========================
-# Analisis 3: Kecepatan Pengiriman Pesanan
-# ===========================
-st.header("3. Kecepatan Pengiriman Pesanan")
+fig, ax = plt.subplots(figsize=(12, 6))
+sns.histplot(customer_spend["total_spend"], bins=20, kde=True, ax=ax)
+ax.set_title("Distribution of Customer Spending")
+st.pyplot(fig)
 
-# Menghitung selisih waktu pengiriman
-merged_df['selisih_waktu'] = pd.to_datetime(merged_df['waktu_pengiriman']) - pd.to_datetime(merged_df['estimasi_pengiriman'])
-shipping_time_fig = plt.figure(figsize=(8, 6))
-sns.histplot(merged_df['selisih_waktu'].dt.days, kde=True, color='red')
-plt.title('Distribusi Selisih Waktu Pengiriman vs Estimasi')
-plt.xlabel('Selisih Waktu Pengiriman (hari)')
-plt.ylabel('Frekuensi')
-st.pyplot(shipping_time_fig)
+# Product Performance
+st.subheader("Product Performance")
+col1, col2 = st.columns(2)
+with col1:
+    most_sold = product_sales.nlargest(5, "product_count")
+    st.markdown(f"**Most Sold Product ID:** {most_sold.iloc[0]['product_id']}")
+with col2:
+    least_sold = product_sales.nsmallest(5, "product_count")
+    st.markdown(f"**Least Sold Product ID:** {least_sold.iloc[0]['product_id']}")
 
-# ===========================
-# Kesimpulan dan Rekomendasi
-# ===========================
-st.header("Kesimpulan dan Rekomendasi")
+fig, ax = plt.subplots(figsize=(12, 6))
+sns.barplot(data=most_sold, x="product_count", y="product_id", ax=ax)
+ax.set_title("Top 5 Most Sold Products")
+st.pyplot(fig)
 
-st.write("""
-    Berdasarkan analisis yang telah dilakukan:
-    - Total pembelian dipengaruhi oleh kategori produk dan frekuensi pembelian.
-    - Ada tren musiman dan pola pembelian yang lebih tinggi pada akhir pekan dan saat liburan.
-    - Pengiriman umumnya cepat, namun ada beberapa keterlambatan yang perlu diperbaiki, terutama pada produk tertentu atau pengiriman ke lokasi tertentu.
-    
-    Rekomendasi:
-    - Menyesuaikan promosi berdasarkan pola pembelian musiman.
-    - Fokus pada peningkatan waktu pengiriman dengan optimasi logistik.
-""")
+# Customer Geography
+st.subheader("Customer Demographics")
+state_counts = customers["customer_state"].value_counts()
+fig, ax = plt.subplots(figsize=(12, 6))
+sns.barplot(x=state_counts.index, y=state_counts.values, ax=ax)
+ax.set_title("Customers by State")
+st.pyplot(fig)
+
+st.caption("Dashboard created for analysis of E-Commerce dataset.")
